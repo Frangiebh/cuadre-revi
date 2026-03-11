@@ -29,12 +29,12 @@ if not email or not token:
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
-    page_title="Sistema de Cuadre de Caja",
+    page_title="Cuadre de caja FRUPO REVI",
     page_icon="🧾",
     layout="wide"
 )
 
-st.title("🧾 Sistema de Cuadre de Caja")
+st.title("🧾 Cuadre de caja FRUPO REVI")
 st.markdown("---")
 
 # --- BARRA LATERAL (solo info, sin credenciales) ---
