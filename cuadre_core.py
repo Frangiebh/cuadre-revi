@@ -7,19 +7,16 @@ import math
 # ------------------------------------------------------------
 # 1. OBTENER TODAS LAS FACTURAS DE UNA FECHA (EN PARALELO CON REINTENTOS)
 # ------------------------------------------------------------
-def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=60, max_reintentos=5):
+import concurrent.futures
+import time
+
+def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=90, max_reintentos=2):
     """
-    Obtiene TODAS las facturas de una fecha usando paginación en paralelo.
-    - email, token: credenciales de Alegra.
-    - fecha: formato YYYY-MM-DD.
-    - max_paginas: número máximo de páginas a intentar (cada página son 30 facturas).
-    - timeout: segundos de espera por cada solicitud.
-    - max_reintentos: número de reintentos por página si falla.
-    Retorna lista de facturas (las que se pudieron obtener).
+    Versión optimizada: menos workers, reintentos limitados y retraso controlado.
     """
     url = "https://api.alegra.com/api/v1/invoices"
     
-    # --- Paso 1: Obtener la primera página con reintentos ---
+    # --- Obtener primera página (con reintentos) ---
     primera_pagina = None
     for intento in range(max_reintentos):
         try:
@@ -41,24 +38,22 @@ def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=60, max
                 print(f"Error en primera página: {response.status_code}")
                 return []
         except Exception as e:
-            print(f"Excepción en primera página: {e}. Reintentando en {2**intento} seg...")
+            print(f"Excepción: {e}. Reintentando...")
             time.sleep(2 ** intento)
     
     if not primera_pagina:
-        print("No se pudo obtener la primera página después de reintentos.")
         return []
     
-    if not primera_pagina:
-        print("No hay facturas para esta fecha.")
-        return []
+    facturas_totales = list(primera_pagina)
     
-    facturas_totales = []
-    facturas_totales.extend(primera_pagina)
+    # --- Preparar páginas siguientes (limitamos a un máximo razonable) ---
+    # Si la primera página tiene menos de 30 facturas, no hay más
+    if len(primera_pagina) < 30:
+        return facturas_totales
     
-    # --- Paso 2: Preparar lista de páginas a solicitar (desde página 2 hasta max_paginas) ---
-    paginas_a_solicitar = list(range(1, max_paginas))  # páginas 1 a max_paginas-1 (start desde 30)
+    paginas_a_solicitar = list(range(1, max_paginas))
     
-    # --- Paso 3: Función para obtener una página específica con reintentos ---
+    # --- Función para obtener página con timeout y reintentos simples ---
     def obtener_pagina(pagina):
         start = pagina * 30
         for intento in range(max_reintentos):
@@ -72,23 +67,24 @@ def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=60, max
                 }
                 response = requests.get(url, auth=(email, token), params=params, timeout=timeout)
                 if response.status_code == 200:
-                    facturas = response.json()
-                    return facturas if facturas else []  # Si viene vacío, no hay más facturas
+                    return response.json()
                 elif response.status_code == 503:
-                    print(f"⚠️ Servidor no disponible (página {pagina+1}). Reintentando en {2**intento} seg...")
+                    print(f"⚠️ Página {pagina+1} no disponible, reintento {intento+1}")
                     time.sleep(2 ** intento)
                 else:
-                    print(f"Error en página {pagina+1}: {response.status_code}")
-                    return []  # Error no recuperable, devolvemos vacío
-            except Exception as e:
-                print(f"Excepción en página {pagina+1}: {e}. Reintentando en {2**intento} seg...")
+                    return []  # error no recuperable
+            except Exception:
                 time.sleep(2 ** intento)
-        print(f"❌ No se pudo obtener página {pagina+1} después de {max_reintentos} reintentos.")
-        return []
+        return []  # falló después de reintentos
     
-    # --- Paso 4: Ejecutar en paralelo ---
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(obtener_pagina, p): p for p in paginas_a_solicitar}
+    # --- Ejecutar con menos workers y espaciado ---
+    facturas_totales = list(primera_pagina)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {}
+        for p in paginas_a_solicitar:
+            time.sleep(0.2)  # pequeño retraso para no saturar
+            futures[executor.submit(obtener_pagina, p)] = p
+        
         for future in concurrent.futures.as_completed(futures):
             resultado = future.result()
             if resultado:
