@@ -1,0 +1,17 @@
+.# Entorno virtual
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos temporales de VS Code
+tempCodeRunnerFile*
+*.code-workspace
+
+# Credenciales locales
+.env
+.streamlit/
