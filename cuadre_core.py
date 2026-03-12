@@ -7,7 +7,7 @@ import math
 # ------------------------------------------------------------
 # 1. OBTENER TODAS LAS FACTURAS DE UNA FECHA (EN PARALELO CON REINTENTOS)
 # ------------------------------------------------------------
-def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=50, max_reintentos=4):
+def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=15, max_reintentos=10):
     """
     Versión optimizada: menos workers, reintentos limitados y retraso controlado.
     """
