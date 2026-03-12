@@ -7,10 +7,7 @@ import math
 # ------------------------------------------------------------
 # 1. OBTENER TODAS LAS FACTURAS DE UNA FECHA (EN PARALELO CON REINTENTOS)
 # ------------------------------------------------------------
-import concurrent.futures
-import time
-
-def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=90, max_reintentos=2):
+def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=50, max_reintentos=4):
     """
     Versión optimizada: menos workers, reintentos limitados y retraso controlado.
     """
@@ -46,8 +43,7 @@ def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=90, max
     
     facturas_totales = list(primera_pagina)
     
-    # --- Preparar páginas siguientes (limitamos a un máximo razonable) ---
-    # Si la primera página tiene menos de 30 facturas, no hay más
+    # --- Si la primera página tiene menos de 30 facturas, no hay más ---
     if len(primera_pagina) < 30:
         return facturas_totales
     
@@ -102,7 +98,6 @@ def facturas_a_dataframe(facturas):
     Extrae método de pago de 'paymentMethod' en cada pago.
     """
     filas = []
-    # Mapeo de códigos a nombres legibles
     metodo_map = {
         'cash': 'Efectivo',
         'credit-card': 'Tarjeta',
@@ -136,7 +131,6 @@ def facturas_a_dataframe(facturas):
                     'sucursal': sucursal
                 })
         else:
-            # Factura sin pagos (crédito o pendiente)
             filas.append({
                 'id_factura': factura_id,
                 'fecha': fecha,
@@ -150,58 +144,92 @@ def facturas_a_dataframe(facturas):
     return pd.DataFrame(filas)
 
 # ------------------------------------------------------------
-# 3. CÁLCULO DEL CUADRE (VERSIÓN FINAL)
+# 3. CÁLCULO DE TOTALES DEL DÍA (INTERNO)
 # ------------------------------------------------------------
-def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo):
+def _calcular_totales_dia(df, sucursal):
     """
-    Calcula el cuadre de caja y devuelve un diccionario con todos los resultados.
+    Calcula los totales de ventas para una sucursal a partir del DataFrame.
+    Retorna un diccionario con:
+        total_facturas, ventas_efectivo, ventas_tarjeta, ventas_transferencia, ventas_credito
     """
-    # Filtrar por sucursal y crear copia
     df_suc = df[df['sucursal'] == sucursal].copy()
-
-    # Ventas totales del día (sin duplicar facturas)
-    ventas_totales_unicas = df_suc.groupby('id_factura')['total_factura'].first().sum()
-
+    
+    # Ventas totales (sin duplicar facturas)
+    total_facturas = df_suc.groupby('id_factura')['total_factura'].first().sum()
+    
     # Ventas por método
     ventas_efectivo = df_suc[df_suc['metodo_pago'] == 'Efectivo']['monto_pago'].sum()
-    # Agrupar tarjetas (puede ser 'Tarjeta Crédito' o 'Tarjeta Débito')
+    # Agrupar tarjetas
     df_suc['metodo_pago_simple'] = df_suc['metodo_pago'].apply(
         lambda x: 'Tarjeta' if 'Tarjeta' in str(x) else x
     )
     ventas_tarjeta = df_suc[df_suc['metodo_pago_simple'] == 'Tarjeta']['monto_pago'].sum()
     ventas_transferencia = df_suc[df_suc['metodo_pago'] == 'Transferencia']['monto_pago'].sum()
     ventas_credito = df_suc[df_suc['metodo_pago'] == 'Crédito']['total_factura'].sum()
-
-    # Total pagado (efectivo + tarjeta + transferencia)
-    total_pagado = ventas_efectivo + ventas_tarjeta + ventas_transferencia
-
-    # Gastos y pagos atrasados
-    total_gastos = sum(g['monto'] for g in gastos)
-    total_pagos_atrasados = sum(p['monto'] for p in pagos_atrasados)
-
-    # Efectivo esperado
-    efectivo_esperado = ventas_efectivo + fondo_inicial - total_gastos + total_pagos_atrasados
-
-    # Efectivo real
-    efectivo_real = sum(denom * cant for denom, cant in conteo_efectivo.items())
-    diferencia = efectivo_real - efectivo_esperado
-
-    # ¿Cuadre aceptable?
-    cuadre_aceptable = -50 <= diferencia <= 50
-
-    # Sugerencia de retiro (billetes grandes)
-    denominaciones_grandes = [2000, 1000, 500, 200]
-    billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
-    total_a_retirar = sum(d * cant for d, cant in billetes_a_retirar.items())
-
-    # Diccionario de resultados
-    resultados = {
-        'total_facturas': ventas_totales_unicas,
-        'total_pagado': total_pagado,
+    
+    return {
+        'total_facturas': total_facturas,
         'efectivo': ventas_efectivo,
         'tarjeta': ventas_tarjeta,
         'transferencia': ventas_transferencia,
-        'credito': ventas_credito,
+        'credito': ventas_credito
+    }
+
+# ------------------------------------------------------------
+# 4. CÁLCULO DEL CUADRE (VERSIÓN CON TURNOS)
+# ------------------------------------------------------------
+def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo, totales_previos=None):
+    """
+    Calcula el cuadre de caja. Si se proporcionan totales_previos (de turnos anteriores),
+    se restan de los totales del día para obtener los del turno actual.
+    
+    totales_previos: diccionario con claves 'total_facturas', 'efectivo', 'tarjeta', 'transferencia', 'credito'
+    """
+    # Totales del día completo
+    totales_dia = _calcular_totales_dia(df, sucursal)
+    
+    # Si hay turnos previos, restamos
+    if totales_previos:
+        totales_turno = {
+            'total_facturas': totales_dia['total_facturas'] - totales_previos.get('total_facturas', 0),
+            'efectivo': totales_dia['efectivo'] - totales_previos.get('efectivo', 0),
+            'tarjeta': totales_dia['tarjeta'] - totales_previos.get('tarjeta', 0),
+            'transferencia': totales_dia['transferencia'] - totales_previos.get('transferencia', 0),
+            'credito': totales_dia['credito'] - totales_previos.get('credito', 0)
+        }
+    else:
+        totales_turno = totales_dia
+    
+    # Asegurar que no queden negativos (por si hay redondeos)
+    for k in totales_turno:
+        totales_turno[k] = max(0, totales_turno[k])
+    
+    # --- Cálculo del efectivo esperado ---
+    total_gastos = sum(g['monto'] for g in gastos)
+    total_pagos_atrasados = sum(p['monto'] for p in pagos_atrasados)
+    efectivo_esperado = totales_turno['efectivo'] + fondo_inicial - total_gastos + total_pagos_atrasados
+    
+    # Efectivo real
+    efectivo_real = sum(denom * cant for denom, cant in conteo_efectivo.items())
+    diferencia = efectivo_real - efectivo_esperado
+    cuadre_aceptable = -50 <= diferencia <= 50
+    
+    # Total pagado (efectivo + tarjeta + transferencia) del turno
+    total_pagado = totales_turno['efectivo'] + totales_turno['tarjeta'] + totales_turno['transferencia']
+    
+    # Sugerencia de retiro (billetes grandes reales)
+    denominaciones_grandes = [2000, 1000, 500, 200]
+    billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
+    total_a_retirar = sum(d * cant for d, cant in billetes_a_retirar.items())
+    
+    # Resultados
+    resultados = {
+        'total_facturas': totales_turno['total_facturas'],
+        'total_pagado': total_pagado,
+        'efectivo': totales_turno['efectivo'],
+        'tarjeta': totales_turno['tarjeta'],
+        'transferencia': totales_turno['transferencia'],
+        'credito': totales_turno['credito'],
         'fondo_inicial': fondo_inicial,
         'total_gastos': total_gastos,
         'total_pagos_atrasados': total_pagos_atrasados,
