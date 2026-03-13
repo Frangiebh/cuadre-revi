@@ -563,18 +563,28 @@ def main_app():
                 st.caption("Ingresa la cantidad de billetes y monedas")
                 denominaciones = [2000, 1000, 500, 200, 100, 50, 25, 10, 5, 1]
                 conteo = {}
-                cols_internas = st.columns(3)
+                cols_internas = st.columns(2)
                 for i, denom in enumerate(denominaciones):
-                    with cols_internas[i % 3]:
-                        conteo[denom] = st.number_input(
-                            f"{denom}",
-                            min_value=0,
-                            step=1,
-                            value=0,
-                            key=f"denom_{denom}",
-                            label_visibility="visible"
-                        )
-                # Opción de retiro manual
+                    if i < 5:
+                        with cols_internas[0]:
+                            conteo[denom] = st.number_input(
+                                f"{denom}",
+                                min_value=0,
+                                step=1,
+                                value=0,
+                                key=f"denom_{denom}",
+                                label_visibility="visible"
+                            )
+                    else:
+                        with cols_internas[1]:
+                            conteo[denom] = st.number_input(
+                                f"{denom}",
+                                min_value=0,
+                                step=1,
+                                value=0,
+                                key=f"denom_{denom}",
+                                label_visibility="visible"
+                            )
                 usar_manual = st.checkbox("Colocar retiro manualmente", value=False, key="usar_retiro_manual")
                 if usar_manual:
                     retiro_manual = st.number_input("Monto total a retirar (RD$)", min_value=0.0, step=100.0, format="%.2f", key="retiro_manual_monto")
