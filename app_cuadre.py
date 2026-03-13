@@ -532,6 +532,7 @@ def main_app():
                 if turno == "Tarde" and hay_cuadre_anterior:
                     st.info(f"💰 Fondo inicial tomado del turno anterior ({fecha_origen} - {turno_origen}): RD$ {fondo_sugerido:,.2f}")
                     campo_deshabilitado = True
+                    usar_mismo = True  # forzamos
                     st.session_state.fondo_input_val = fondo_sugerido
                 else:
                     if hay_cuadre_anterior:
@@ -543,6 +544,7 @@ def main_app():
                         else:
                             campo_deshabilitado = False
                     else:
+                        usar_mismo = False
                         campo_deshabilitado = False
 
                 fondo_inicial = st.number_input(
@@ -554,6 +556,11 @@ def main_app():
                     disabled=campo_deshabilitado,
                     key="fondo_input"
                 )
+
+                # Seguridad: si el checkbox está marcado, usamos el sugerido (por si el campo no se deshabilitó)
+                if usar_mismo:
+                    fondo_inicial = fondo_sugerido
+
                 if not campo_deshabilitado:
                     st.session_state.fondo_input_val = fondo_inicial
 
