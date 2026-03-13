@@ -157,7 +157,11 @@ def _calcular_totales_dia(df, sucursal):
 # ------------------------------------------------------------
 # 4. CÁLCULO DEL CUADRE (VERSIÓN CON TURNOS)
 # ------------------------------------------------------------
-def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo, totales_previos=None):
+def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo, totales_previos=None, retiro_manual=None):
+    """
+    Calcula el cuadre de caja. Si se proporciona retiro_manual, se usa ese monto en lugar
+    del sugerido por billetes grandes.
+    """
     totales_dia = _calcular_totales_dia(df, sucursal)
     if totales_previos:
         totales_turno = {
@@ -179,9 +183,16 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
     diferencia = efectivo_real - efectivo_esperado
     cuadre_aceptable = -50 <= diferencia <= 50
     total_pagado = totales_turno['efectivo'] + totales_turno['tarjeta'] + totales_turno['transferencia']
-    denominaciones_grandes = [2000, 1000, 500, 200]
-    billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
-    total_a_retirar = sum(d * cant for d, cant in billetes_a_retirar.items())
+
+    # Cálculo del retiro
+    if retiro_manual is not None:
+        total_a_retirar = retiro_manual
+        billetes_a_retirar = {}  # Vacío porque es manual
+    else:
+        denominaciones_grandes = [2000, 1000, 500, 200]
+        billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
+        total_a_retirar = sum(d * cant for d, cant in billetes_a_retirar.items())
+
     return {
         'total_facturas': totales_turno['total_facturas'],
         'total_pagado': total_pagado,

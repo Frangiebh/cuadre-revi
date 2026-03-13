@@ -17,6 +17,8 @@ from cuadre_core import (
 )
 
 # -------------------- CONFIGURACIÓN INICIAL --------------------
+st.set_page_config(page_title="Cuadre Revi", page_icon="🧾", layout="wide")
+
 load_dotenv()
 
 # Credenciales de Alegra
@@ -28,7 +30,7 @@ except (AttributeError, KeyError, Exception):
     token = os.getenv('ALEGRA_TOKEN')
 
 if not email or not token:
-    st.error("Error de configuración: credenciales de Alegra no encontradas.")
+    st.error("❌ Credenciales de Alegra no encontradas.")
     st.stop()
 
 # Credenciales de Supabase
@@ -40,23 +42,32 @@ except (AttributeError, KeyError, Exception):
     supabase_key = os.getenv('SUPABASE_KEY')
 
 if not supabase_url or not supabase_key:
-    st.error("Error de configuración: credenciales de Supabase no encontradas.")
+    st.error("❌ Credenciales de Supabase no encontradas.")
     st.stop()
 
-supabase: Client = create_client(supabase_url, supabase_key)
+# Crear cliente de Supabase
+try:
+    supabase: Client = create_client(supabase_url, supabase_key)
+except Exception as e:
+    st.error(f"❌ Error al conectar con Supabase: {e}")
+    st.stop()
 
 # -------------------- FUNCIONES DE BASE DE DATOS --------------------
 def init_db():
     """Verifica que las tablas existan y crea usuario admin si no existe."""
-    response = supabase.table('usuarios').select('*').eq('username', 'gruporevi').execute()
-    if not response.data:
-        password_hash = bcrypt.hashpw('revigrupo1'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        supabase.table('usuarios').insert({
-            'username': 'gruporevi',
-            'password_hash': password_hash,
-            'nombre_completo': 'Administrador',
-            'rol': 'admin'
-        }).execute()
+    try:
+        response = supabase.table('usuarios').select('*').eq('username', 'gruporevi').execute()
+        if not response.data:
+            password_hash = bcrypt.hashpw('revigrupo1'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            supabase.table('usuarios').insert({
+                'username': 'gruporevi',
+                'password_hash': password_hash,
+                'nombre_completo': 'Administrador',
+                'rol': 'admin'
+            }).execute()
+    except Exception as e:
+        st.error(f"❌ Error en init_db: {e}")
+        st.stop()
 
 def verificar_login(username, password):
     username_lower = username.lower()
@@ -73,7 +84,8 @@ def verificar_login(username, password):
     return None
 
 def guardar_cuadre(resultados, sucursal, turno, usuario_id, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo,
-                   validacion_b02_ok=None, validacion_b01_ok=None, validacion_b01_inconsistencias=None):
+                   validacion_b02_ok=None, validacion_b01_ok=None, validacion_b01_inconsistencias=None,
+                   retiro_manual=None):
     billetes_json = json.dumps(resultados['billetes_a_retirar'])
     data = {
         'fecha': resultados['fecha'],
@@ -95,18 +107,21 @@ def guardar_cuadre(resultados, sucursal, turno, usuario_id, fondo_inicial, gasto
         'billetes_retirados': billetes_json,
         'validacion_b02_ok': int(validacion_b02_ok) if validacion_b02_ok is not None else None,
         'validacion_b01_ok': int(validacion_b01_ok) if validacion_b01_ok is not None else None,
-        'validacion_b01_inconsistencias': validacion_b01_inconsistencias
+        'validacion_b01_inconsistencias': validacion_b01_inconsistencias,
+        'retiro_manual': retiro_manual
     }
     supabase.table('cuadres').insert(data).execute()
 
 def calcular_total_retirado(fecha_inicio, fecha_fin, sucursal=None):
-    query = supabase.table('cuadres').select('billetes_retirados', 'fecha', 'sucursal').gte('fecha', fecha_inicio).lte('fecha', fecha_fin)
+    query = supabase.table('cuadres').select('billetes_retirados', 'retiro_manual').gte('fecha', fecha_inicio).lte('fecha', fecha_fin)
     if sucursal and sucursal != "Todas":
         query = query.eq('sucursal', sucursal)
     response = query.execute()
     total = 0
     for row in response.data:
-        if row['billetes_retirados']:
+        if row['retiro_manual'] is not None:
+            total += row['retiro_manual']
+        elif row['billetes_retirados']:
             billetes = json.loads(row['billetes_retirados'])
             total += sum(int(denom) * cant for denom, cant in billetes.items())
     return total
@@ -126,11 +141,15 @@ def obtener_ultimo_cuadre(sucursal, fecha=None):
     response = query.order('fecha', desc=True).order('timestamp', desc=True).limit(1).execute()
     if response.data:
         ultimo = response.data[0]
-        billetes_json = ultimo.get('billetes_retirados')
-        total_retirado = 0
-        if billetes_json:
-            billetes = json.loads(billetes_json)
-            total_retirado = sum(int(denom) * cant for denom, cant in billetes.items())
+        # Determinar el total retirado
+        if ultimo.get('retiro_manual') is not None:
+            total_retirado = float(ultimo['retiro_manual'])
+        else:
+            billetes_json = ultimo.get('billetes_retirados')
+            total_retirado = 0
+            if billetes_json:
+                billetes = json.loads(billetes_json)
+                total_retirado = sum(int(denom) * cant for denom, cant in billetes.items())
         fondo_siguiente = ultimo['efectivo_real'] - total_retirado
         return {
             'existe': True,
@@ -175,7 +194,13 @@ def obtener_historial(fecha_inicio=None, fecha_fin=None, sucursal=None):
 
 # -------------------- PÁGINA DE LOGIN --------------------
 def mostrar_login():
-    st.title("🔐 Iniciar Sesión - Cuadre Revi")
+    # Logo más grande a la izquierda del título
+    col_logo, col_titulo = st.columns([1, 4])
+    with col_logo:
+        st.image("assets/logo_revi.png", width=150)  # Aumentado de 80 a 150
+    with col_titulo:
+        st.title("🔐 Iniciar Sesión - Cuadre Revi")
+    
     with st.form("login_form"):
         username = st.text_input("Usuario")
         password = st.text_input("Contraseña o PIN", type="password")
@@ -245,18 +270,22 @@ def admin_panel_usuarios():
 
 # -------------------- PÁGINA DE HISTORIAL --------------------
 def mostrar_historial():
-    st.subheader("📜 Historial de Cuadres")
+    st.subheader("📜 Historial")
     es_admin = st.session_state['usuario_rol'] == 'admin'
 
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        fecha_inicio = st.date_input("Fecha inicio", value=None, key="hist_fecha_ini")
-    with col_f2:
-        fecha_fin = st.date_input("Fecha fin", value=None, key="hist_fecha_fin")
-    with col_f3:
-        sucursales = ["Todas"] + ["LA ROMANA", "SD", "BAVARO"]
-        sucursal_filtro = st.selectbox("Sucursal", sucursales, key="hist_sucursal")
+    # Filtros en un contenedor con borde
+    with st.container(border=True):
+        st.subheader("🔍 Filtros")
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            fecha_inicio = st.date_input("Fecha inicio", value=None, key="hist_fecha_ini")
+        with col_f2:
+            fecha_fin = st.date_input("Fecha fin", value=None, key="hist_fecha_fin")
+        with col_f3:
+            sucursales = ["Todas"] + ["LA ROMANA", "SD", "BAVARO"]
+            sucursal_filtro = st.selectbox("Sucursal", sucursales, key="hist_sucursal")
 
+    # Obtener datos
     historial = obtener_historial(
         fecha_inicio.strftime("%Y-%m-%d") if fecha_inicio else None,
         fecha_fin.strftime("%Y-%m-%d") if fecha_fin else None,
@@ -272,9 +301,18 @@ def mostrar_historial():
     df_hist['aceptable'] = df_hist['cuadre_aceptable'].apply(lambda x: "✅" if x else "❌")
     df_hist['fecha'] = pd.to_datetime(df_hist['fecha']).dt.strftime('%Y-%m-%d')
 
-    df_mostrar = df_hist[['id', 'fecha', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia', 'aceptable']].copy()
-    df_mostrar.columns = ['ID', 'Fecha', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'Estado']
+    # Añadir columnas de validaciones fiscales
+    df_hist['B02'] = df_hist['validacion_b02_ok'].apply(lambda x: "✅" if x else "❌" if x is not None else "")
+    df_hist['B01'] = df_hist['validacion_b01_ok'].apply(lambda x: "✅" if x else "❌" if x is not None else "")
 
+    # Preparar columnas para mostrar
+    columnas_disponibles = ['id', 'fecha', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia']
+    columnas_extra = ['B02', 'B01', 'aceptable']
+    columnas_a_usar = [col for col in columnas_disponibles if col in df_hist.columns] + columnas_extra
+    df_mostrar = df_hist[columnas_a_usar].copy()
+    df_mostrar.columns = ['ID', 'Fecha', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'B02', 'B01', 'Estado']
+
+    st.caption(f"Mostrando {len(df_hist)} cuadres")
     evento = st.dataframe(
         df_mostrar,
         use_container_width=True,
@@ -288,6 +326,7 @@ def mostrar_historial():
         selection_mode="single-row"
     )
 
+    # Si se selecciona una fila, mostrar detalles
     if evento.selection.rows:
         idx = evento.selection.rows[0]
         fila = df_hist.iloc[idx]
@@ -311,28 +350,28 @@ def mostrar_historial():
                 st.write(f"**Efectivo contado:** RD$ {fila['efectivo_real']:,.2f}")
                 st.write(f"**Diferencia:** RD$ {fila['diferencia']:,.2f}")
                 st.write(f"**Aceptable:** {'✅' if fila['cuadre_aceptable'] else '❌'}")
-                if fila['billetes_retirados']:
+                # Mostrar retiro (manual o por billetes)
+                if fila.get('retiro_manual') is not None:
+                    st.write(f"**Total retirado:** RD$ {fila['retiro_manual']:,.2f} (retiro manual)")
+                elif fila['billetes_retirados']:
                     billetes = json.loads(fila['billetes_retirados'])
+                    total_retirado = sum(int(denom) * cant for denom, cant in billetes.items())
                     st.write(f"**Billetes retirados:** {', '.join(f'{v} de {k}' for k, v in billetes.items())}")
-                                # Mostrar validaciones fiscales si existen
+                    st.write(f"**Total retirado:** RD$ {total_retirado:,.2f}")
+                else:
+                    st.write("**Total retirado:** RD$ 0")
+
+            # Validaciones fiscales como texto plano
             if fila.get('validacion_b02_ok') is not None:
                 st.markdown("---")
-                st.subheader("🧾 Validaciones fiscales del cuadre")
-                col_v1, col_v2 = st.columns(2)
-                with col_v1:
-                    if fila['validacion_b02_ok']:
-                        st.success("✅ Relación tarjetas vs B02 correcta")
-                    else:
-                        st.error("❌ Relación tarjetas vs B02 incorrecta")
-                with col_v2:
-                    if fila['validacion_b01_ok']:
-                        st.success("✅ Secuencia B01 correcta")
-                    else:
-                        st.error("❌ Secuencia B01 con inconsistencias")
-                        if fila.get('validacion_b01_inconsistencias'):
-                            incons = json.loads(fila['validacion_b01_inconsistencias'])
-                            for inc in incons[:5]:
-                                st.warning(inc)
+                st.write("**Validaciones fiscales:**")
+                st.write(f"- **B02:** {'✅ Correcta' if fila['validacion_b02_ok'] else '❌ Incorrecta'}")
+                st.write(f"- **B01:** {'✅ Correcta' if fila['validacion_b01_ok'] else '❌ Con inconsistencias'}")
+                if not fila['validacion_b01_ok'] and fila.get('validacion_b01_inconsistencias'):
+                    st.write("  **Inconsistencias:**")
+                    incons = json.loads(fila['validacion_b01_inconsistencias'])
+                    for inc in incons[:5]:
+                        st.write(f"  - {inc}")
 
             if es_admin:
                 st.markdown("---")
@@ -346,9 +385,10 @@ def mostrar_historial():
                     else:
                         st.error("Debes marcar la casilla de confirmación para eliminar.")
 
+    # Sección de administración (solo para admin)
     if es_admin:
         st.markdown("---")
-        with st.expander("💰 Administración - Totales y exportación", expanded=False):
+        with st.expander("💰 Retiros y Gastos en cuadres", expanded=False):
             col_filtros = st.columns(3)
             with col_filtros[0]:
                 fecha_ini = st.date_input("Fecha inicio", value=date.today().replace(day=1), key="admin_fecha_ini")
@@ -357,43 +397,52 @@ def mostrar_historial():
             with col_filtros[2]:
                 suc_sel = st.selectbox("Sucursal", ["Todas"] + ["LA ROMANA", "SD", "BAVARO"], key="admin_suc")
 
-            col_tot1, col_tot2 = st.columns(2)
-            with col_tot1:
-                st.subheader("💰 Total retirado")
-                if st.button("Calcular retirado", key="calc_retirado"):
-                    total_ret = calcular_total_retirado(
+            opcion = st.radio("Selecciona qué calcular", ["Total retirado", "Total gastos"], horizontal=True, key="admin_opcion")
+            if st.button("Calcular", key="admin_calcular"):
+                if opcion == "Total retirado":
+                    total = calcular_total_retirado(
                         fecha_ini.strftime("%Y-%m-%d"),
                         fecha_fin.strftime("%Y-%m-%d"),
                         suc_sel if suc_sel != "Todas" else None
                     )
-                    st.success(f"RD$ {total_ret:,.2f}")
-            with col_tot2:
-                st.subheader("💸 Total gastos")
-                if st.button("Calcular gastos", key="calc_gastos"):
-                    total_gas = calcular_total_gastos(
+                    st.success(f"💰 Total retirado: RD$ {total:,.2f}")
+                else:
+                    total = calcular_total_gastos(
                         fecha_ini.strftime("%Y-%m-%d"),
                         fecha_fin.strftime("%Y-%m-%d"),
                         suc_sel if suc_sel != "Todas" else None
                     )
-                    st.success(f"RD$ {total_gas:,.2f}")
+                    st.success(f"💸 Total gastos: RD$ {total:,.2f}")
 
-            st.markdown("---")
-            st.subheader("📥 Exportar historial completo")
+        # Exportación con un solo botón
+        st.markdown("---")
+        if st.button("📥 Exportar historial completo a Excel", type="secondary", key="export_excel"):
             cols_export = ['id', 'fecha', 'sucursal', 'turno', 'usuario', 'fondo_inicial',
                            'total_gastos', 'total_pagos_atrasados', 'ventas_efectivo',
                            'ventas_tarjeta', 'ventas_transferencia', 'ventas_credito',
                            'total_facturas', 'efectivo_esperado', 'efectivo_real',
-                           'diferencia', 'cuadre_aceptable', 'billetes_retirados']
-            df_export = df_hist[cols_export].copy()
-            df_export['cuadre_aceptable'] = df_export['cuadre_aceptable'].apply(lambda x: 'Sí' if x else 'No')
-            df_export['billetes_retirados'] = df_export['billetes_retirados'].apply(
-                lambda x: ', '.join(f"{v} de {k}" for k, v in json.loads(x).items()) if x else ''
-            )
+                           'diferencia', 'cuadre_aceptable', 'billetes_retirados', 'retiro_manual',
+                           'validacion_b02_ok', 'validacion_b01_ok']
+            # Filtrar solo las columnas que existen
+            cols_existentes = [col for col in cols_export if col in df_hist.columns]
+            df_export = df_hist[cols_existentes].copy()
+            if 'cuadre_aceptable' in df_export.columns:
+                df_export['cuadre_aceptable'] = df_export['cuadre_aceptable'].apply(lambda x: 'Sí' if x else 'No')
+            if 'validacion_b02_ok' in df_export.columns:
+                df_export['validacion_b02_ok'] = df_export['validacion_b02_ok'].apply(lambda x: 'Sí' if x else 'No' if x is not None else '')
+            if 'validacion_b01_ok' in df_export.columns:
+                df_export['validacion_b01_ok'] = df_export['validacion_b01_ok'].apply(lambda x: 'Sí' if x else 'No' if x is not None else '')
+            if 'billetes_retirados' in df_export.columns:
+                df_export['billetes_retirados'] = df_export['billetes_retirados'].apply(
+                    lambda x: ', '.join(f"{v} de {k}" for k, v in json.loads(x).items()) if x else ''
+                )
+            if 'retiro_manual' in df_export.columns:
+                df_export['retiro_manual'] = df_export['retiro_manual'].apply(lambda x: f"RD$ {x:,.2f}" if x else "")
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_export.to_excel(writer, index=False, sheet_name='Detalle de cuadres')
             st.download_button(
-                label="📥 Descargar Excel (detalle completo)",
+                label="Descargar Excel",
                 data=buffer.getvalue(),
                 file_name=f"cuadres_detalle_{date.today()}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -401,7 +450,32 @@ def mostrar_historial():
 
 # -------------------- INTERFAZ PRINCIPAL --------------------
 def main_app():
-    st.set_page_config(page_title="Cuadre Revi", page_icon="🧾", layout="wide")
+    # CSS personalizado
+    st.markdown("""
+    <style>
+        .stNumberInput input {
+            width: 80px;
+            padding: 0.25rem;
+        }
+        .stNumberInput label {
+            font-size: 0.8rem;
+        }
+        div.row-widget.stRadio > div {
+            flex-direction: row;
+            align-items: center;
+        }
+        div.row-widget.stRadio > div > label {
+            margin-right: 10px;
+            background-color: #f0f2f6;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+        div.row-widget.stRadio > div > label:hover {
+            background-color: #e0e2e6;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
     with st.sidebar:
         st.header(f"👤 Usuario: {st.session_state['usuario_nombre']}")
@@ -410,7 +484,7 @@ def main_app():
             st.session_state.clear()
             st.rerun()
         st.markdown("---")
-        modo = st.radio("Seleccionar modo", ["📋 Nuevo cuadre", "📜 Historial"])
+        modo = st.radio("", ["📋 Nuevo cuadre", "📜 Historial"], label_visibility="collapsed")
         st.markdown("---")
         st.header("🔐 Estado de conexión")
         st.success("✅ Conectado a Alegra y Supabase")
@@ -419,17 +493,27 @@ def main_app():
             with st.expander("⚙️ Administrar usuarios", expanded=False):
                 admin_panel_usuarios()
 
+    # --- Contenido principal según el modo ---
     if modo == "📋 Nuevo cuadre":
-        st.title("🧾 Nuevo Cuadre de Caja - REVI")
+        # Logo y título (fuera de la barra lateral)
+        col_logo, col_titulo = st.columns([1, 3])
+        with col_logo:
+            st.image("assets/logo_revi.png", width=150)
+        with col_titulo:
+            st.markdown("<h1 style='text-align: left;'>Cuadre de caja<br><span style='font-size: 0.6em;'>GRUPO REVI</span></h1>", unsafe_allow_html=True)
         st.markdown("---")
 
         col1, col2 = st.columns(2)
         with col1:
-            st.subheader("📅 Datos del cuadre")
-            fecha = st.date_input("Fecha", value=date.today())
-            sucursal = st.selectbox("Sucursal", ["LA ROMANA", "SD", "BAVARO"])
-            turno = st.selectbox("Turno", ["Mañana", "Tarde", "Completo (único)"])
+            with st.container(border=True):
+                st.subheader("📅 Datos del cuadre")
+                fecha = st.date_input("Fecha", value=date.today())
+                sucursal = st.selectbox("Sucursal", ["LA ROMANA", "SD", "BAVARO"])
+                turno = st.selectbox("Turno", ["Mañana", "Tarde", "Completo (único)"])
 
+            st.divider()
+
+            # Fondo inicial
             ultimo = obtener_ultimo_cuadre(sucursal, fecha.strftime("%Y-%m-%d"))
             if 'fondo_input_val' not in st.session_state:
                 st.session_state.fondo_input_val = 0.0
@@ -443,73 +527,97 @@ def main_app():
                 fecha_origen = ultimo['fecha']
                 turno_origen = ultimo['turno']
 
-            if turno == "Tarde" and hay_cuadre_anterior:
-                st.info(f"💰 Fondo inicial tomado del turno anterior ({fecha_origen} - {turno_origen}): RD$ {fondo_sugerido:,.2f}")
-                campo_deshabilitado = True
-                st.session_state.fondo_input_val = fondo_sugerido
-            else:
-                if hay_cuadre_anterior:
-                    usar_mismo = st.checkbox("Usar fondo del cuadre anterior", value=True)
-                    if usar_mismo:
-                        st.info(f"💰 Fondo inicial tomado del cuadre anterior ({fecha_origen} - {turno_origen}): RD$ {fondo_sugerido:,.2f}")
-                        st.session_state.fondo_input_val = fondo_sugerido
-                        campo_deshabilitado = True
+            with st.container(border=True):
+                st.subheader("💰 Fondo inicial")
+                if turno == "Tarde" and hay_cuadre_anterior:
+                    st.info(f"💰 Fondo inicial tomado del turno anterior ({fecha_origen} - {turno_origen}): RD$ {fondo_sugerido:,.2f}")
+                    campo_deshabilitado = True
+                    st.session_state.fondo_input_val = fondo_sugerido
+                else:
+                    if hay_cuadre_anterior:
+                        usar_mismo = st.checkbox("Usar fondo del cuadre anterior", value=True)
+                        if usar_mismo:
+                            st.info(f"💰 Fondo inicial tomado del cuadre anterior ({fecha_origen} - {turno_origen}): RD$ {fondo_sugerido:,.2f}")
+                            st.session_state.fondo_input_val = fondo_sugerido
+                            campo_deshabilitado = True
+                        else:
+                            campo_deshabilitado = False
                     else:
                         campo_deshabilitado = False
-                else:
-                    campo_deshabilitado = False
 
-            fondo_inicial = st.number_input(
-                "Fondo inicial (RD$)",
-                min_value=0.0,
-                step=100.0,
-                format="%.2f",
-                value=st.session_state.fondo_input_val,
-                disabled=campo_deshabilitado,
-                key="fondo_input"
-            )
-            if not campo_deshabilitado:
-                st.session_state.fondo_input_val = fondo_inicial
+                fondo_inicial = st.number_input(
+                    "Fondo inicial (RD$)",
+                    min_value=0.0,
+                    step=100.0,
+                    format="%.2f",
+                    value=st.session_state.fondo_input_val,
+                    disabled=campo_deshabilitado,
+                    key="fondo_input"
+                )
+                if not campo_deshabilitado:
+                    st.session_state.fondo_input_val = fondo_inicial
 
         with col2:
-            st.subheader("💰 Conteo de efectivo")
-            st.caption("Ingresa la cantidad de billetes y monedas")
-            denominaciones = [2000, 1000, 500, 200, 100, 50, 25, 10, 5, 1]
-            conteo = {}
-            cols_internas = st.columns(2)
-            for i, denom in enumerate(denominaciones):
-                with cols_internas[i % 2]:
-                    conteo[denom] = st.number_input(
-                        f"{denom}",
-                        min_value=0,
-                        step=1,
-                        value=0,
-                        key=f"denom_{denom}"
-                    )
+            with st.container(border=True):
+                st.subheader("💰 Efectivo en caja")
+                st.caption("Ingresa la cantidad de billetes y monedas")
+                denominaciones = [2000, 1000, 500, 200, 100, 50, 25, 10, 5, 1]
+                conteo = {}
+                cols_internas = st.columns(3)
+                for i, denom in enumerate(denominaciones):
+                    with cols_internas[i % 3]:
+                        conteo[denom] = st.number_input(
+                            f"{denom}",
+                            min_value=0,
+                            step=1,
+                            value=0,
+                            key=f"denom_{denom}",
+                            label_visibility="visible"
+                        )
+                # Opción de retiro manual
+                usar_manual = st.checkbox("Colocar retiro manualmente", value=False, key="usar_retiro_manual")
+                if usar_manual:
+                    retiro_manual = st.number_input("Monto total a retirar (RD$)", min_value=0.0, step=100.0, format="%.2f", key="retiro_manual_monto")
+                else:
+                    retiro_manual = None
 
-        with st.expander("➕ Gastos del turno"):
-            gastos = []
-            num_gastos = st.number_input("Número de gastos", min_value=0, step=1, value=0, key="num_gastos")
-            for i in range(int(num_gastos)):
-                col_g1, col_g2 = st.columns(2)
-                with col_g1:
-                    concepto = st.text_input(f"Concepto {i+1}", key=f"concepto_{i}")
-                with col_g2:
-                    monto = st.number_input(f"Monto {i+1}", min_value=0.0, format="%.2f", key=f"monto_gasto_{i}")
-                if concepto and monto:
-                    gastos.append({'concepto': concepto, 'monto': monto})
+        # Gastos y pagos atrasados dinámicos
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            with st.expander("➕ Gastos del turno", expanded=False):
+                gastos = []
+                if 'gastos_count' not in st.session_state:
+                    st.session_state.gastos_count = 1
+                # Mostrar filas de gastos
+                for i in range(st.session_state.gastos_count):
+                    cols = st.columns(2)
+                    with cols[0]:
+                        concepto = st.text_input(f"Concepto {i+1}", key=f"gasto_concepto_{i}")
+                    with cols[1]:
+                        monto = st.number_input(f"Monto {i+1}", min_value=0.0, format="%.2f", key=f"gasto_monto_{i}")
+                    if concepto and monto > 0:
+                        gastos.append({'concepto': concepto, 'monto': monto})
+                # Si la última fila tiene datos, agregar una nueva fila vacía
+                if i + 1 == st.session_state.gastos_count and concepto and monto > 0:
+                    st.session_state.gastos_count += 1
+                    st.rerun()
 
-        with st.expander("🔄 Pagos atrasados (de otros días)"):
-            pagos_atrasados = []
-            num_pagos = st.number_input("Número de pagos atrasados", min_value=0, step=1, value=0, key="num_pagos")
-            for i in range(int(num_pagos)):
-                col_p1, col_p2 = st.columns(2)
-                with col_p1:
-                    ref = st.text_input(f"Referencia {i+1}", key=f"ref_{i}")
-                with col_p2:
-                    monto_p = st.number_input(f"Monto {i+1}", min_value=0.0, format="%.2f", key=f"monto_pago_{i}")
-                if ref and monto_p:
-                    pagos_atrasados.append({'referencia': ref, 'monto': monto_p})
+        with col_exp2:
+            with st.expander("🔄 Pagos atrasados (facturas o con fechas anteriores)", expanded=False):
+                pagos_atrasados = []
+                if 'pagos_count' not in st.session_state:
+                    st.session_state.pagos_count = 1
+                for i in range(st.session_state.pagos_count):
+                    cols = st.columns(2)
+                    with cols[0]:
+                        ref = st.text_input(f"Referencia {i+1}", key=f"pago_ref_{i}")
+                    with cols[1]:
+                        monto_p = st.number_input(f"Monto {i+1}", min_value=0.0, format="%.2f", key=f"pago_monto_{i}")
+                    if ref and monto_p > 0:
+                        pagos_atrasados.append({'referencia': ref, 'monto': monto_p})
+                if i + 1 == st.session_state.pagos_count and ref and monto_p > 0:
+                    st.session_state.pagos_count += 1
+                    st.rerun()
 
         st.markdown("---")
 
@@ -530,41 +638,42 @@ def main_app():
 
                     resultados = calcular_cuadre(
                         df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo,
-                        totales_previos=totales_previos
+                        totales_previos=totales_previos,
+                        retiro_manual=retiro_manual
                     )
+                    
                     resultados['fecha'] = fecha.strftime("%Y-%m-%d")
 
-                    # Calcular validaciones fiscales
                     es_valido1, msg1, ventas_tarjeta, total_b02 = validar_relacion_tarjetas_b02(df, sucursal, resultados['tarjeta'])
                     es_valido2, msg2, inconsistencias = validar_secuencia_b01(df, fecha.strftime("%Y-%m-%d"))
 
-                    # Guardar incluyendo validaciones
                     guardar_cuadre(resultados, sucursal, turno, st.session_state['usuario_id'],
                                    fondo_inicial, gastos, pagos_atrasados, conteo,
                                    validacion_b02_ok=es_valido1,
                                    validacion_b01_ok=es_valido2,
-                                   validacion_b01_inconsistencias=json.dumps(inconsistencias) if inconsistencias else None)
-
+                                   validacion_b01_inconsistencias=json.dumps(inconsistencias) if inconsistencias else None,
+                                   retiro_manual=retiro_manual)
+                                   
                     st.balloons()
                     st.success("✅ Cuadre calculado y guardado en historial")
 
-                    # Mostrar métricas principales
-                    col_res1, col_res2, col_res3 = st.columns(3)
-                    col_res1.metric("Ventas totales del turno", f"RD$ {resultados['total_facturas']:,.2f}")
-                    col_res2.metric("Total pagado", f"RD$ {resultados['total_pagado']:,.2f}")
-                    col_res3.metric("Efectivo esperado", f"RD$ {resultados['efectivo_esperado']:,.2f}")
+                    with st.container(border=True):
+                        st.subheader("📊 Resultados del cuadre")
+                        col_res1, col_res2, col_res3 = st.columns(3)
+                        col_res1.metric("Ventas totales del turno", f"RD$ {resultados['total_facturas']:,.2f}")
+                        col_res2.metric("Total pagado", f"RD$ {resultados['total_pagado']:,.2f}")
+                        col_res3.metric("Efectivo esperado", f"RD$ {resultados['efectivo_esperado']:,.2f}")
 
-                    col_res4, col_res5 = st.columns(2)
-                    col_res4.metric("Efectivo contado", f"RD$ {resultados['efectivo_real']:,.2f}")
-                    delta_color = "off" if resultados['cuadre_aceptable'] else "inverse"
-                    col_res5.metric("Diferencia", f"RD$ {resultados['diferencia']:,.2f}", delta_color=delta_color)
+                        col_res4, col_res5 = st.columns(2)
+                        col_res4.metric("Efectivo contado", f"RD$ {resultados['efectivo_real']:,.2f}")
+                        delta_color = "off" if resultados['cuadre_aceptable'] else "inverse"
+                        col_res5.metric("Diferencia", f"RD$ {resultados['diferencia']:,.2f}", delta_color=delta_color)
 
-                    if resultados['cuadre_aceptable']:
-                        st.success("✅ CUADRE ACEPTABLE (dentro del rango ±50)")
-                    else:
-                        st.error("❌ CUADRE FUERA DE RANGO - Revisar")
+                        if resultados['cuadre_aceptable']:
+                            st.success("✅ CUADRE ACEPTABLE (dentro del rango ±50)")
+                        else:
+                            st.error("❌ CUADRE FUERA DE RANGO - Revisar")
 
-                    # Detalle de ventas
                     with st.expander("📊 Ver detalle de ventas por método de pago", expanded=False):
                         detalle = {
                             "Efectivo": f"RD$ {resultados['efectivo']:,.2f}",
@@ -574,7 +683,6 @@ def main_app():
                         }
                         st.json(detalle)
 
-                    # Validaciones fiscales (usando variables ya calculadas)
                     with st.expander("🧾 Validaciones fiscales", expanded=False):
                         col_v1, col_v2 = st.columns(2)
                         with col_v1:
@@ -592,13 +700,15 @@ def main_app():
                                     for inc in inconsistencias[:5]:
                                         st.warning(inc)
 
-                    # Sugerencia de retiro
                     if resultados['total_a_retirar'] > 0:
                         st.info(f"💰 Sugerencia de retiro para este turno: RD$ {resultados['total_a_retirar']:,.2f}")
-                        desglose = ", ".join(f"{cant} de {denom}" for denom, cant in resultados['billetes_a_retirar'].items())
-                        st.write(f"**Desglose:** {desglose}")
+                        if retiro_manual is not None:
+                            st.caption("(Retiro manual aplicado)")
+                        else:
+                            desglose = ", ".join(f"{cant} de {denom}" for denom, cant in resultados['billetes_a_retirar'].items())
+                            st.write(f"**Desglose:** {desglose}")
 
-    else:
+    else:  # Modo historial
         mostrar_historial()
 
 # -------------------- CONTROL DE SESIÓN --------------------
