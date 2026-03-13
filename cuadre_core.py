@@ -193,7 +193,7 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
         billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
         total_a_retirar = sum(d * cant for d, cant in billetes_a_retirar.items())
 
-    return {
+    resultados = {
         'total_facturas': totales_turno['total_facturas'],
         'total_pagado': total_pagado,
         'efectivo': totales_turno['efectivo'],
@@ -210,6 +210,7 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
         'billetes_a_retirar': billetes_a_retirar,
         'total_a_retirar': total_a_retirar
     }
+    return resultados
 
 # ------------------------------------------------------------
 # 5. VALIDACIONES FISCALES (NCF)
