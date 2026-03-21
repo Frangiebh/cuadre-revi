@@ -207,8 +207,8 @@ def mostrar_login():
         st.title("🔐 Iniciar Sesión - Cuadre Revi")
     
     with st.form("login_form"):
-        username = st.text_input("Usuario")
-        password = st.text_input("Contraseña o PIN", type="password")
+        username = st.text_input("Usuario", autocomplete="off")
+        password = st.text_input("Contraseña o PIN", type="password", autocomplete="off")
         submitted = st.form_submit_button("Ingresar")
         if submitted:
             user = verificar_login(username, password)
