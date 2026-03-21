@@ -312,11 +312,11 @@ def mostrar_historial():
     df_hist['B01'] = df_hist['validacion_b01_ok'].apply(lambda x: "✅" if x else "❌" if x is not None else "")
 
     # Preparar columnas para mostrar
-    columnas_disponibles = ['id', 'fecha', 'fecha_registro', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia']
-    columnas_extra = ['B02', 'B01', 'aceptable']
+    columnas_disponibles = ['id', 'fecha', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia', 'aceptable']
+    columnas_extra = ['B02', 'B01', 'fecha_registro']
     columnas_a_usar = [col for col in columnas_disponibles if col in df_hist.columns] + columnas_extra
     df_mostrar = df_hist[columnas_a_usar].copy()
-    df_mostrar.columns = ['ID', 'Fecha', 'fecha_registro', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'B02', 'B01', 'Estado']
+    df_mostrar.columns = ['ID', 'Fecha', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'Estado', 'B02', 'B01', 'fecha_registro']
 
     st.caption(f"Mostrando {len(df_hist)} cuadres")
     evento = st.dataframe(
@@ -367,6 +367,20 @@ def mostrar_historial():
                     st.write(f"**Total retirado:** RD$ {total_retirado:,.2f}")
                 else:
                     st.write("**Total retirado:** RD$ 0")
+
+                        # Mostrar pagos atrasados detallados
+            if fila.get('pagos_atrasados_detalle'):
+                st.markdown("---")
+                st.write("**Pagos atrasados:**")
+                for pago in json.loads(fila['pagos_atrasados_detalle']):
+                    forma = "🔁 Transferencia/Tarjeta" if pago.get('es_transferencia') else "💵 Efectivo"
+                    st.write(f"- {pago['referencia']}: RD$ {pago['monto']:,.2f} ({forma})")
+
+            if fila.get('gastos_detalle'):
+                st.markdown("---")
+                st.write("**Gastos del turno:**")
+                for gasto in json.loads(fila['gastos_detalle']):
+                    st.write(f"- {gasto['concepto']}: RD$ {gasto['monto']:,.2f}")
 
             # Validaciones fiscales como texto plano
             if fila.get('validacion_b02_ok') is not None:
