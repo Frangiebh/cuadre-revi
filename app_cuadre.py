@@ -87,6 +87,9 @@ def guardar_cuadre(resultados, sucursal, turno, usuario_id, fondo_inicial, gasto
                    validacion_b02_ok=None, validacion_b01_ok=None, validacion_b01_inconsistencias=None,
                    retiro_manual=None):
     billetes_json = json.dumps(resultados['billetes_a_retirar'])
+    gastos_json = json.dumps(gastos) if gastos else None
+    pagos_atrasados_json = json.dumps(pagos_atrasados) if pagos_atrasados else None
+
     data = {
         'fecha': resultados['fecha'],
         'sucursal': sucursal,
@@ -108,7 +111,9 @@ def guardar_cuadre(resultados, sucursal, turno, usuario_id, fondo_inicial, gasto
         'validacion_b02_ok': int(validacion_b02_ok) if validacion_b02_ok is not None else None,
         'validacion_b01_ok': int(validacion_b01_ok) if validacion_b01_ok is not None else None,
         'validacion_b01_inconsistencias': validacion_b01_inconsistencias,
-        'retiro_manual': retiro_manual
+        'retiro_manual': retiro_manual,
+        'gastos_detalle': gastos_json,
+        'pagos_atrasados_detalle': pagos_atrasados_json
     }
     supabase.table('cuadres').insert(data).execute()
 
@@ -549,7 +554,7 @@ def main_app():
 
                 fondo_inicial = st.number_input(
                     "Fondo inicial (RD$)",
-                    min_value=0.0,
+                    min_value=-1000000.0,
                     step=100.0,
                     format="%.2f",
                     value=st.session_state.fondo_input_val,
@@ -625,13 +630,19 @@ def main_app():
                 if 'pagos_count' not in st.session_state:
                     st.session_state.pagos_count = 1
                 for i in range(st.session_state.pagos_count):
-                    cols = st.columns(2)
+                    cols = st.columns(3)
                     with cols[0]:
                         ref = st.text_input(f"Referencia {i+1}", key=f"pago_ref_{i}")
                     with cols[1]:
                         monto_p = st.number_input(f"Monto {i+1}", min_value=0.0, format="%.2f", key=f"pago_monto_{i}")
+                    with cols[2]:
+                        es_transferencia = st.checkbox("Transferencia/Tarjeta", key=f"pago_transferencia_{i}", value=False)
                     if ref and monto_p > 0:
-                        pagos_atrasados.append({'referencia': ref, 'monto': monto_p})
+                        pagos_atrasados.append({
+                            'referencia': ref,
+                            'monto': monto_p,
+                            'es_transferencia': es_transferencia
+                        })
                 if i + 1 == st.session_state.pagos_count and ref and monto_p > 0:
                     st.session_state.pagos_count += 1
                     st.rerun()

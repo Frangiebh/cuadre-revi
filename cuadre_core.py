@@ -6,7 +6,7 @@ import concurrent.futures
 # ------------------------------------------------------------
 # 1. OBTENER TODAS LAS FACTURAS DE UNA FECHA (EN PARALELO CON REINTENTOS)
 # ------------------------------------------------------------
-def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=15, max_reintentos=10):
+def obtener_todas_facturas(email, token, fecha, max_paginas=100, timeout=7, max_reintentos=10):
     url = "https://api.alegra.com/api/v1/invoices"
     primera_pagina = None
     for intento in range(max_reintentos):
@@ -159,8 +159,8 @@ def _calcular_totales_dia(df, sucursal):
 # ------------------------------------------------------------
 def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo_efectivo, totales_previos=None, retiro_manual=None):
     """
-    Calcula el cuadre de caja. Si se proporciona retiro_manual, se usa ese monto en lugar
-    del sugerido por billetes grandes.
+    Calcula el cuadre de caja.
+    pagos_atrasados: lista de diccionarios con claves 'referencia', 'monto', 'es_transferencia' (bool).
     """
     totales_dia = _calcular_totales_dia(df, sucursal)
     if totales_previos:
@@ -177,7 +177,8 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
         totales_turno[k] = max(0, totales_turno[k])
 
     total_gastos = sum(g['monto'] for g in gastos)
-    total_pagos_atrasados = sum(p['monto'] for p in pagos_atrasados)
+    # Solo sumar pagos atrasados en efectivo
+    total_pagos_atrasados = sum(p['monto'] for p in pagos_atrasados if not p.get('es_transferencia', False))
     efectivo_esperado = totales_turno['efectivo'] + fondo_inicial - total_gastos + total_pagos_atrasados
     efectivo_real = sum(denom * cant for denom, cant in conteo_efectivo.items())
     diferencia = efectivo_real - efectivo_esperado
@@ -187,7 +188,7 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
     # Cálculo del retiro
     if retiro_manual is not None:
         total_a_retirar = retiro_manual
-        billetes_a_retirar = {}  # Vacío porque es manual
+        billetes_a_retirar = {}
     else:
         denominaciones_grandes = [2000, 1000, 500, 200]
         billetes_a_retirar = {d: conteo_efectivo.get(d, 0) for d in denominaciones_grandes if conteo_efectivo.get(d, 0) > 0}
@@ -202,7 +203,7 @@ def calcular_cuadre(df, sucursal, fondo_inicial, gastos, pagos_atrasados, conteo
         'credito': totales_turno['credito'],
         'fondo_inicial': fondo_inicial,
         'total_gastos': total_gastos,
-        'total_pagos_atrasados': total_pagos_atrasados,
+        'total_pagos_atrasados': total_pagos_atrasados,  # solo efectivo
         'efectivo_esperado': efectivo_esperado,
         'efectivo_real': efectivo_real,
         'diferencia': diferencia,
