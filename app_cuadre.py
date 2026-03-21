@@ -302,6 +302,7 @@ def mostrar_historial():
         return
 
     df_hist = pd.DataFrame(historial)
+    df_hist['fecha_registro'] = pd.to_datetime(df_hist['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
     df_hist['usuario'] = df_hist['usuarios'].apply(lambda x: x['nombre_completo'] if x else 'Desconocido')
     df_hist['aceptable'] = df_hist['cuadre_aceptable'].apply(lambda x: "✅" if x else "❌")
     df_hist['fecha'] = pd.to_datetime(df_hist['fecha']).dt.strftime('%Y-%m-%d')
@@ -311,11 +312,11 @@ def mostrar_historial():
     df_hist['B01'] = df_hist['validacion_b01_ok'].apply(lambda x: "✅" if x else "❌" if x is not None else "")
 
     # Preparar columnas para mostrar
-    columnas_disponibles = ['id', 'fecha', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia']
+    columnas_disponibles = ['id', 'fecha', 'fecha_registro', 'sucursal', 'turno', 'usuario', 'total_facturas', 'diferencia']
     columnas_extra = ['B02', 'B01', 'aceptable']
     columnas_a_usar = [col for col in columnas_disponibles if col in df_hist.columns] + columnas_extra
     df_mostrar = df_hist[columnas_a_usar].copy()
-    df_mostrar.columns = ['ID', 'Fecha', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'B02', 'B01', 'Estado']
+    df_mostrar.columns = ['ID', 'Fecha', 'fecha_registro', 'Sucursal', 'Turno', 'Usuario', 'Ventas', 'Diferencia', 'B02', 'B01', 'Estado']
 
     st.caption(f"Mostrando {len(df_hist)} cuadres")
     evento = st.dataframe(
@@ -345,6 +346,7 @@ def mostrar_historial():
                 st.write(f"**Fondo inicial:** RD$ {fila['fondo_inicial']:,.2f}")
                 st.write(f"**Gastos:** RD$ {fila['total_gastos']:,.2f}")
                 st.write(f"**Pagos atrasados:** RD$ {fila['total_pagos_atrasados']:,.2f}")
+                st.write(f"**Fecha de registro:** {fila['fecha_registro']}")
             with col2:
                 st.write(f"**Ventas efectivo:** RD$ {fila['ventas_efectivo']:,.2f}")
                 st.write(f"**Ventas tarjeta:** RD$ {fila['ventas_tarjeta']:,.2f}")
