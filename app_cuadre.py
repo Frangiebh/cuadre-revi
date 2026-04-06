@@ -345,7 +345,7 @@ def mostrar_historial():
                 st.write(f"**Usuario:** {fila['usuario']}")
                 st.write(f"**Fondo inicial:** RD$ {fila['fondo_inicial']:,.2f}")
                 st.write(f"**Gastos:** RD$ {fila['total_gastos']:,.2f}")
-                st.write(f"**Pagos atrasados:** RD$ {fila['total_pagos_atrasados']:,.2f}")
+                st.write(f"**Pagos atrasados (efectivo):** RD$ {fila['total_pagos_atrasados']:,.2f}")
                 st.write(f"**Fecha de registro:** {fila['fecha_registro']}")
             with col2:
                 st.write(f"**Ventas efectivo:** RD$ {fila['ventas_efectivo']:,.2f}")
@@ -357,10 +357,11 @@ def mostrar_historial():
                 st.write(f"**Efectivo contado:** RD$ {fila['efectivo_real']:,.2f}")
                 st.write(f"**Diferencia:** RD$ {fila['diferencia']:,.2f}")
                 st.write(f"**Aceptable:** {'✅' if fila['cuadre_aceptable'] else '❌'}")
+
                 # Mostrar retiro (manual o por billetes)
                 if fila.get('retiro_manual') is not None:
                     st.write(f"**Total retirado:** RD$ {fila['retiro_manual']:,.2f} (retiro manual)")
-                elif fila['billetes_retirados']:
+                elif fila.get('billetes_retirados'):
                     billetes = json.loads(fila['billetes_retirados'])
                     total_retirado = sum(int(denom) * cant for denom, cant in billetes.items())
                     st.write(f"**Billetes retirados:** {', '.join(f'{v} de {k}' for k, v in billetes.items())}")
@@ -368,21 +369,32 @@ def mostrar_historial():
                 else:
                     st.write("**Total retirado:** RD$ 0")
 
-                        # Mostrar pagos atrasados detallados
-            if fila.get('pagos_atrasados_detalle'):
-                st.markdown("---")
-                st.write("**Pagos atrasados:**")
-                for pago in json.loads(fila['pagos_atrasados_detalle']):
-                    forma = "🔁 Transferencia/Tarjeta" if pago.get('es_transferencia') else "💵 Efectivo"
-                    st.write(f"- {pago['referencia']}: RD$ {pago['monto']:,.2f} ({forma})")
+            # --- Gastos detallados (seguro) ---
+            if fila.get('gastos_detalle') and isinstance(fila['gastos_detalle'], str) and fila['gastos_detalle'].strip():
+                try:
+                    gastos_lista = json.loads(fila['gastos_detalle'])
+                    if gastos_lista:
+                        st.markdown("---")
+                        st.write("**Gastos del turno:**")
+                        for gasto in gastos_lista:
+                            st.write(f"- {gasto.get('concepto', '')}: RD$ {gasto.get('monto', 0):,.2f}")
+                except Exception:
+                    st.warning("No se pudieron cargar los gastos detallados.")
 
-            if fila.get('gastos_detalle'):
-                st.markdown("---")
-                st.write("**Gastos del turno:**")
-                for gasto in json.loads(fila['gastos_detalle']):
-                    st.write(f"- {gasto['concepto']}: RD$ {gasto['monto']:,.2f}")
+            # --- Pagos atrasados detallados (seguro) ---
+            if fila.get('pagos_atrasados_detalle') and isinstance(fila['pagos_atrasados_detalle'], str) and fila['pagos_atrasados_detalle'].strip():
+                try:
+                    pagos_lista = json.loads(fila['pagos_atrasados_detalle'])
+                    if pagos_lista:
+                        st.markdown("---")
+                        st.write("**Pagos atrasados:**")
+                        for pago in pagos_lista:
+                            forma = "🔁 Transferencia/Tarjeta" if pago.get('es_transferencia') else "💵 Efectivo"
+                            st.write(f"- {pago.get('referencia', '')}: RD$ {pago.get('monto', 0):,.2f} ({forma})")
+                except Exception:
+                    st.warning("No se pudieron cargar los pagos atrasados detallados.")
 
-            # Validaciones fiscales como texto plano
+            # Validaciones fiscales
             if fila.get('validacion_b02_ok') is not None:
                 st.markdown("---")
                 st.write("**Validaciones fiscales:**")
@@ -390,10 +402,14 @@ def mostrar_historial():
                 st.write(f"- **B01:** {'✅ Correcta' if fila['validacion_b01_ok'] else '❌ Con inconsistencias'}")
                 if not fila['validacion_b01_ok'] and fila.get('validacion_b01_inconsistencias'):
                     st.write("  **Inconsistencias:**")
-                    incons = json.loads(fila['validacion_b01_inconsistencias'])
-                    for inc in incons[:5]:
-                        st.write(f"  - {inc}")
+                    try:
+                        incons = json.loads(fila['validacion_b01_inconsistencias'])
+                        for inc in incons[:5]:
+                            st.write(f"  - {inc}")
+                    except Exception:
+                        st.write("  (No se pudieron mostrar las inconsistencias)")
 
+            # Botón eliminar solo para admin
             if es_admin:
                 st.markdown("---")
                 st.warning("⚠️ Zona de administración: eliminar este cuadre")
