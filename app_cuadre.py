@@ -521,7 +521,7 @@ def main_app():
             st.session_state.clear()
             st.rerun()
         st.markdown("---")
-        modo = st.radio("", ["📋 Nuevo cuadre", "📜 Historial"], label_visibility="collapsed")
+        modo = st.radio("Seleccionar modo", ["📋 Nuevo cuadre", "📜 Historial"], label_visibility="collapsed")
         st.markdown("---")
         st.header("🔐 Estado de conexión")
         st.success("✅ Conectado a Alegra y Supabase")
